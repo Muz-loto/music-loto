@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Музыкальное Лото</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const storage = {
+            async get(key) { const item = localStorage.getItem(key); return item ? { value: item } : null; },
+            async set(key, value) { localStorage.setItem(key, value); return { key, value }; },
+            async delete(key) { localStorage.removeItem(key); return { deleted: true }; }
+        };
+        window.storage = storage;
+
+        const MusicLoto = () => {
+            const [role, setRole] = useState(null);
+            const [categories, setCategories] = useState([]);
+            const [selectedCategory, setSelectedCategory] = useState('');
+            const [songs, setSongs] = useState([]);
+            const [gameState, setGameState] = useState('idle');
+            const [currentSongIndex, setCurrentSongIndex] = useState(-1);
+            const [playerCard, setPlayerCard] = useState([]);
+            const [markedCells, setMarkedCells] = useState([]);
+            const [newCategory, setNewCategory] = useState('');
+            const [editingSong, setEditingSong] = useState(null);
+            const audioRef = useRef(null);
+
+            useEffect(() => { loadData(); }, []);
+
+            const loadData = async () => {
+                try {
+                    const data = await storage.get('categories');
+                    if (data) setCategories(JSON.parse(data.value));
+                } catch (e) {}
+            };
+
+            const saveCategories = async (cats) => {
+                await storage.set('categories', JSON.stringify(cats));
+            };
+
+            const saveSongs = async (cat, list) => {
+                await storage.set(`songs-${cat}`, JSON.stringify(list));
+            };
+
+            const loadSongs = async (cat) => {
+                try {
+                    const data = await storage.get(`songs-${cat}`);
+                    return data ? JSON.parse(data.value) : [];
+                } catch (e) { return []; }
+            };
+
+            const addCategory = () => {
+                if (newCategory.trim()) {
+                    const updated = [...categories, { name: newCategory, songCount: 0 }];
+                    setCategories(updated);
+                    saveCategories(updated);
+                    setNewCategory('');
+                }
+            };
+
+            const deleteCategory = async (name) => {
+                const updated = categories.filter(c => c.name !== name);
+                setCategories(updated);
+                saveCategories(updated);
+                await storage.delete(`songs-${name}`);
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (file && file.type === 'audio/mpeg') {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        setEditingSong({ id: Date.now(), artist: '', title: '', audioData: ev.target.result, isNew: true });
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const saveSong = async () => {
+                if (editingSong?.artist && editingSong?.title && selectedCategory) {
+                    const current = await loadSongs(selectedCategory);
+                    const updated = editingSong.isNew ? [...current, { id: editingSong.id, artist: editingSong.artist, title: editingSong.title, audioData: editingSong.audioData }] : current.map(s => s.id === editingSong.id ? editingSong : s);
+                    setSongs(updated);
+                    await saveSongs(selectedCategory, updated);
+                    const updatedCats = categories.map(c => c.name === selectedCategory ? { ...c, songCount: updated.length } : c);
+                    setCategories(updatedCats);
+                    saveCategories(updatedCats);
+                    setEditingSong(null);
+                }
+            };
+
+            const deleteSong = async (id) => {
+                const updated = songs.filter(s => s.id !== id);
+                setSongs(updated);
+                await saveSongs(selectedCategory, updated);
+                const updatedCats = categories.map(c => c.name === selectedCategory ? { ...c, songCount: updated.length } : c);
+                setCategories(updatedCats);
+                saveCategories(updatedCats);
+            };
+
+            const selectCategory = async (name) => {
+                setSelectedCategory(name);
+                const loaded = await loadSongs(name);
+                setSongs(loaded);
+            };
+
+            const startGame = () => {
+                if (songs.length < 25) { alert('Нужно минимум 25 песен!'); return; }
+                const shuffled = [...songs].sort(() => Math.random() - 0.5);
+                setSongs(shuffled);
+                setCurrentSongIndex(0);
+                setGameState('playing');
+                if (role === 'player') {
+                    const card = shuffled.slice(0, 25);
+                    setPlayerCard(card);
+                }
+            };
+
+            const toggleCell = (i) => {
+                setMarkedCells(markedCells.includes(i) ? markedCells.filter(idx => idx !== i) : [...markedCells, i]);
+            };
+
+            const playPause = () => {
+                if (audioRef.current) {
+                    if (gameState === 'playing') {
+                        audioRef.current.pause();
+                        setGameState('paused');
+                    } else {
+                        audioRef.current.play();
+                        setGameState('playing');
+                    }
+                }
+            };
+
+            const nextSong = () => {
+                if (currentSongIndex < songs.length - 1) {
+                    setCurrentSongIndex(currentSongIndex + 1);
+                    setGameState('playing');
+                }
+            };
+
+            const prevSong = () => {
+                if (currentSongIndex > 0) {
+                    setCurrentSongIndex(currentSongIndex - 1);
+                    setGameState('playing');
+                }
+            };
+
+            const endGame = () => {
+                setGameState('idle');
+                setCurrentSongIndex(-1);
+                if (audioRef.current) {
+                    audioRef.current.pause();
+                    audioRef.current.currentTime = 0;
+                }
+            };
+
+            useEffect(() => {
+                if (audioRef.current && currentSongIndex >= 0 && gameState === 'playing' && role === 'host') {
+                    audioRef.current.load();
+                    audioRef.current.play();
+                }
+            }, [currentSongIndex]);
+
+            if (!role) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
+                            <div className="text-center mb-8">
+                                <div className="text-6xl mb-4">🎵</div>
+                                <h1 className="text-3xl font-bold text-gray-800">Музыкальное Лото</h1>
+                            </div>
+                            <div className="space-y-4">
+                                <button onClick={() => setRole('host')} className="w-full bg-purple-600 text-white py-4 rounded-xl font-semibold hover:bg-purple-700">Я ведущий</button>
+                                <button onClick={() => setRole('player')} className="w-full bg-blue-600 text-white py-4 rounded-xl font-semibold hover:bg-blue-700">Я участник</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (role === 'host') {
+                return (
+                    <div className="min-h-screen bg-gray-100 p-4">
+                        <div className="max-w-6xl mx-auto">
+                            <div className="bg-white rounded-xl shadow-lg p-6">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h1 className="text-2xl font-bold">Панель ведущего</h1>
+                                    <button onClick={() => setRole(null)} className="text-gray-600 hover:text-gray-800">Выйти</button>
+                                </div>
+
+                                {gameState === 'idle' && (
+                                    <>
+                                        <div className="mb-6">
+                                            <h2 className="text-xl font-semibold mb-4">Категории</h2>
+                                            <div className="flex gap-2 mb-4">
+                                                <input type="text" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="Новая категория" className="flex-1 px-4 py-2 border rounded-lg" />
+                                                <button onClick={addCategory} className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">+</button>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {categories.map(c => (
+                                                    <div key={c.name} className={`p-4 border-2 rounded-lg cursor-pointer ${selectedCategory === c.name ? 'border-purple-600 bg-purple-50' : 'border-gray-200'}`} onClick={() => selectCategory(c.name)}>
+                                                        <div className="flex justify-between">
+                                                            <div>
+                                                                <div className="font-semibold">{c.name}</div>
+                                                                <div className="text-sm text-gray-600">{c.songCount} песен</div>
+                                                            </div>
+                                                            <button onClick={(e) => { e.stopPropagation(); deleteCategory(c.name); }} className="text-red-600">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {selectedCategory && (
+                                            <div className="mb-6">
+                                                <h2 className="text-xl font-semibold mb-4">Песни - {selectedCategory}</h2>
+                                                <label className="block mb-4">
+                                                    <div className="bg-blue-600 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-700 text-center">📤 Загрузить MP3</div>
+                                                    <input type="file" accept="audio/mpeg" onChange={handleFileUpload} className="hidden" />
+                                                </label>
+                                                <div className="space-y-3 max-h-96 overflow-y-auto">
+                                                    {songs.map(s => (
+                                                        <div key={s.id} className="flex justify-between p-4 bg-gray-50 rounded-lg">
+                                                            <div>
+                                                                <div className="font-semibold">{s.artist}</div>
+                                                                <div className="text-sm text-gray-600">{s.title}</div>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => setEditingSong(s)} className="text-blue-600">✏️</button>
+                                                                <button onClick={() => deleteSong(s.id)} className="text-red-600">🗑️</button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {songs.length >= 25 && <button onClick={startGame} className="w-full bg-green-600 text-white py-4 rounded-xl font-semibold hover:bg-green-700 text-lg">Начать игру</button>}
+                                        {songs.length > 0 && songs.length < 25 && <div className="text-center text-amber-600 font-semibold">Загрузите минимум 25 песен ({songs.length}/25)</div>}
+                                    </>
+                                )}
+
+                                {gameState !== 'idle' && currentSongIndex >= 0 && (
+                                    <div className="space-y-6">
+                                        <div className="bg-purple-50 p-6 rounded-xl border-2 border-purple-200">
+                                            <div className="text-center mb-6">
+                                                <div className="text-4xl font-bold text-purple-600 mb-2">Песня {currentSongIndex + 1} из {songs.length}</div>
+                                                <div className="text-gray-600">Песня воспроизводится...</div>
+                                            </div>
+                                            <audio ref={audioRef} className="hidden"><source src={songs[currentSongIndex]?.audioData} type="audio/mpeg" /></audio>
+                                            <div className="flex justify-center gap-4 mb-6">
+                                                <button onClick={prevSong} disabled={currentSongIndex === 0} className="bg-gray-600 text-white p-4 rounded-full hover:bg-gray-700 disabled:opacity-50">⏮️</button>
+                                                <button onClick={playPause} className="bg-purple-600 text-white p-6 rounded-full hover:bg-purple-700 text-2xl">{gameState === 'playing' ? '⏸️' : '▶️'}</button>
+                                                <button onClick={nextSong} disabled={currentSongIndex === songs.length - 1} className="bg-gray-600 text-white p-4 rounded-full hover:bg-gray-700 disabled:opacity-50">⏭️</button>
+                                            </div>
+                                            <button onClick={endGame} className="w-full bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 font-semibold">Закончить игру</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {editingSong && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+                                <div className="bg-white rounded-xl p-6 max-w-md w-full">
+                                    <h3 className="text-xl font-bold mb-4">{editingSong.isNew ? 'Добавить песню' : 'Редактировать'}</h3>
+                                    <div className="space-y-4">
+                                        <input type="text" value={editingSong.artist} onChange={(e) => setEditingSong({...editingSong, artist: e.target.value})} placeholder="Исполнитель" className="w-full px-4 py-2 border rounded-lg" />
+                                        <input type="text" value={editingSong.title} onChange={(e) => setEditingSong({...editingSong, title: e.target.value})} placeholder="Название" className="w-full px-4 py-2 border rounded-lg" />
+                                        <div className="flex gap-2">
+                                            <button onClick={saveSong} className="flex-1 bg-green-600 text-white py-2 rounded-lg">✓ Сохранить</button>
+                                            <button onClick={() => setEditingSong(null)} className="flex-1 bg-gray-600 text-white py-2 rounded-lg">✕ Отмена</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-600 to-purple-600 p-4">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="bg-white rounded-xl shadow-lg p-6">
+                            <div className="flex justify-between items-center mb-6">
+                                <h1 className="text-2xl font-bold">Моя карточка</h1>
+                                <button onClick={() => setRole(null)} className="text-gray-600">Выйти</button>
+                            </div>
+                            {playerCard.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <div className="text-6xl mb-4">🎵</div>
+                                    <p className="text-gray-600 mb-2 text-lg font-semibold">Нажмите "Начать игру"</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="mb-4 text-center">
+                                        <div className="inline-block bg-blue-100 text-blue-800 px-4 py-2 rounded-lg font-semibold">
+                                            {gameState === 'playing' ? '🎵 Игра идёт' : gameState === 'paused' ? '⏸️ Пауза' : '⏹️ Завершена'}
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-5 gap-2">
+                                        {playerCard.map((s, i) => (
+                                            <div key={i} onClick={() => toggleCell(i)} className={`aspect-square border-2 rounded-lg p-2 cursor-pointer transition ${markedCells.includes(i) ? 'bg-green-600 border-green-700 text-white' : 'bg-white border-gray-300'}`}>
+                                                <div className="text-xs font-semibold truncate">{s.artist}</div>
+                                                <div className="text-xs truncate">{s.title}</div>
+                                                {markedCells.includes(i) && <div className="text-center mt-1">✓</div>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 text-center text-sm text-gray-600">Отмечено: {markedCells.length}/25</div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<MusicLoto />, document.getElementById('root'));
+    </script>
+</body>
+</html>
