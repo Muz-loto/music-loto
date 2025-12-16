@@ -137,49 +137,47 @@
             };
 
             const saveSong = async () => {
-                if (!editingSong?.artist || !editingSong?.title || !selectedCategory) {
+                if (!editingSong?.artist?.trim() || !editingSong?.title?.trim() || !selectedCategory) {
                     alert('Заполните все поля!');
                     return;
                 }
 
-                try {
-                    // Загружаем текущий список песен
-                    const current = await loadSongs(selectedCategory);
-                    let updated;
-                    
-                    if (editingSong.isNew) {
-                        // Добавляем новую песню
-                        updated = [...current, { 
-                            id: editingSong.id, 
-                            artist: editingSong.artist, 
-                            title: editingSong.title, 
-                            audioData: editingSong.audioData 
-                        }];
-                    } else {
-                        // Обновляем существующую
-                        updated = current.map(s => s.id === editingSong.id ? editingSong : s);
-                    }
-                    
-                    // Сохраняем обновленный список песен
-                    await saveSongs(selectedCategory, updated);
-                    
-                    // Обновляем состояние песен
-                    setSongs(updated);
-                    
-                    // Обновляем счетчик песен в категории
-                    const updatedCats = categories.map(c => 
-                        c.name === selectedCategory ? { ...c, songCount: updated.length } : c
-                    );
-                    setCategories(updatedCats);
-                    await saveCategories(updatedCats);
-                    
-                    // ВАЖНО: Закрываем окно после успешного сохранения
-                    setEditingSong(null);
-                    
-                } catch (error) {
-                    console.error('Ошибка сохранения песни:', error);
-                    alert('Ошибка при сохранении песни');
+                // Загружаем текущий список песен
+                const current = await loadSongs(selectedCategory);
+                let updated;
+                
+                if (editingSong.isNew) {
+                    // Добавляем новую песню
+                    updated = [...current, { 
+                        id: editingSong.id, 
+                        artist: editingSong.artist.trim(), 
+                        title: editingSong.title.trim(), 
+                        audioData: editingSong.audioData 
+                    }];
+                } else {
+                    // Обновляем существующую
+                    updated = current.map(s => s.id === editingSong.id ? {
+                        ...editingSong,
+                        artist: editingSong.artist.trim(),
+                        title: editingSong.title.trim()
+                    } : s);
                 }
+                
+                // Сохраняем обновленный список песен
+                await saveSongs(selectedCategory, updated);
+                
+                // Обновляем состояние песен
+                setSongs(updated);
+                
+                // Обновляем счетчик песен в категории
+                const updatedCats = categories.map(c => 
+                    c.name === selectedCategory ? { ...c, songCount: updated.length } : c
+                );
+                setCategories(updatedCats);
+                saveCategories(updatedCats);
+                
+                // Закрываем окно после успешного сохранения
+                setEditingSong(null);
             };
 
             const deleteSong = async (id) => {
