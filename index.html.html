@@ -43,13 +43,26 @@
             const [editingSong, setEditingSong] = useState(null);
             const audioRef = useRef(null);
 
-            useEffect(() => { loadData(); }, []);
+            useEffect(() => { 
+                loadData(); 
+            }, []);
+
+            // Загрузка песен при выборе категории
+            useEffect(() => {
+                if (selectedCategory) {
+                    loadSongsForCategory(selectedCategory);
+                }
+            }, [selectedCategory]);
 
             const loadData = async () => {
                 try {
                     const data = await storage.get('categories');
-                    if (data) setCategories(JSON.parse(data.value));
-                } catch (e) {}
+                    if (data) {
+                        setCategories(JSON.parse(data.value));
+                    }
+                } catch (e) {
+                    console.log('Первая загрузка');
+                }
             };
 
             const saveCategories = async (cats) => {
@@ -58,6 +71,21 @@
 
             const saveSongs = async (cat, list) => {
                 await storage.set(`songs-${cat}`, JSON.stringify(list));
+            };
+
+            const loadSongsForCategory = async (cat) => {
+                try {
+                    const data = await storage.get(`songs-${cat}`);
+                    if (data) {
+                        const loadedSongs = JSON.parse(data.value);
+                        setSongs(loadedSongs);
+                        return loadedSongs;
+                    }
+                } catch (e) {
+                    console.log('Нет песен для категории');
+                }
+                setSongs([]);
+                return [];
             };
 
             const loadSongs = async (cat) => {
@@ -83,6 +111,10 @@
                 setCategories(updated);
                 saveCategories(updated);
                 await storage.delete(`songs-${name}`);
+                if (selectedCategory === name) {
+                    setSelectedCategory('');
+                    setSongs([]);
+                }
             };
 
             const handleFileUpload = (e) => {
@@ -100,16 +132,23 @@
                     };
                     reader.readAsDataURL(file);
                 }
-                // Сброс input для возможности загрузки того же файла снова
+                // Очищаем input чтобы можно было загрузить тот же файл снова
                 e.target.value = '';
             };
 
             const saveSong = async () => {
-                if (editingSong?.artist && editingSong?.title && selectedCategory) {
+                if (!editingSong?.artist || !editingSong?.title || !selectedCategory) {
+                    alert('Заполните все поля!');
+                    return;
+                }
+
+                try {
+                    // Загружаем текущий список песен
                     const current = await loadSongs(selectedCategory);
                     let updated;
                     
                     if (editingSong.isNew) {
+                        // Добавляем новую песню
                         updated = [...current, { 
                             id: editingSong.id, 
                             artist: editingSong.artist, 
@@ -117,43 +156,54 @@
                             audioData: editingSong.audioData 
                         }];
                     } else {
+                        // Обновляем существующую
                         updated = current.map(s => s.id === editingSong.id ? editingSong : s);
                     }
                     
-                    setSongs(updated);
+                    // Сохраняем обновленный список песен
                     await saveSongs(selectedCategory, updated);
                     
+                    // Обновляем состояние песен
+                    setSongs(updated);
+                    
+                    // Обновляем счетчик песен в категории
                     const updatedCats = categories.map(c => 
                         c.name === selectedCategory ? { ...c, songCount: updated.length } : c
                     );
                     setCategories(updatedCats);
-                    saveCategories(updatedCats);
+                    await saveCategories(updatedCats);
                     
-                    // Автоматическое закрытие окна после сохранения
+                    // ВАЖНО: Закрываем окно после успешного сохранения
                     setEditingSong(null);
+                    
+                } catch (error) {
+                    console.error('Ошибка сохранения песни:', error);
+                    alert('Ошибка при сохранении песни');
                 }
             };
 
             const deleteSong = async (id) => {
+                if (!confirm('Удалить эту песню?')) return;
+                
                 const updated = songs.filter(s => s.id !== id);
                 setSongs(updated);
                 await saveSongs(selectedCategory, updated);
+                
                 const updatedCats = categories.map(c => 
                     c.name === selectedCategory ? { ...c, songCount: updated.length } : c
                 );
                 setCategories(updatedCats);
-                saveCategories(updatedCats);
+                await saveCategories(updatedCats);
             };
 
             const selectCategory = async (name) => {
                 setSelectedCategory(name);
-                const loaded = await loadSongs(name);
-                setSongs(loaded);
+                // Песни загрузятся через useEffect
             };
 
             const startGame = () => {
                 if (songs.length < 25) { 
-                    alert('Нужно минимум 25 песен!'); 
+                    alert('Нужно минимум 25 песен для игры!'); 
                     return; 
                 }
                 const shuffled = [...songs].sort(() => Math.random() - 0.5);
@@ -280,7 +330,7 @@
                                                                 <div className="text-sm text-gray-600">{c.songCount} песен</div>
                                                             </div>
                                                             <button 
-                                                                onClick={(e) => { e.stopPropagation(); if(confirm('Удалить категорию?')) deleteCategory(c.name); }} 
+                                                                onClick={(e) => { e.stopPropagation(); deleteCategory(c.name); }} 
                                                                 className="text-red-600 hover:text-red-800 text-xl"
                                                             >
                                                                 🗑️
@@ -306,6 +356,11 @@
                                                     />
                                                 </label>
                                                 <div className="space-y-3 max-h-96 overflow-y-auto">
+                                                    {songs.length === 0 && (
+                                                        <div className="text-center text-gray-500 py-8">
+                                                            Загрузите первую песню
+                                                        </div>
+                                                    )}
                                                     {songs.map(s => (
                                                         <div key={s.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                                             <div>
@@ -320,7 +375,7 @@
                                                                     ✏️
                                                                 </button>
                                                                 <button 
-                                                                    onClick={() => { if(confirm('Удалить песню?')) deleteSong(s.id); }} 
+                                                                    onClick={() => deleteSong(s.id)} 
                                                                     className="text-red-600 hover:text-red-800 text-xl"
                                                                 >
                                                                     🗑️
@@ -411,6 +466,7 @@
                                                 onChange={(e) => setEditingSong({...editingSong, artist: e.target.value})} 
                                                 placeholder="Например: The Beatles" 
                                                 className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none" 
+                                                autoFocus
                                             />
                                         </div>
                                         <div>
@@ -419,6 +475,11 @@
                                                 type="text" 
                                                 value={editingSong.title} 
                                                 onChange={(e) => setEditingSong({...editingSong, title: e.target.value})} 
+                                                onKeyPress={(e) => {
+                                                    if (e.key === 'Enter' && editingSong.artist && editingSong.title) {
+                                                        saveSong();
+                                                    }
+                                                }}
                                                 placeholder="Например: Yesterday" 
                                                 className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none" 
                                             />
@@ -478,23 +539,29 @@
                                         <div className="text-center py-12">
                                             <div className="text-6xl mb-4">🎵</div>
                                             <p className="text-gray-600 mb-2 text-lg font-semibold">Выберите категорию</p>
-                                            <p className="text-sm text-gray-500">Загрузите минимум 25 песен для начала игры</p>
+                                            <p className="text-sm text-gray-500 mb-6">Загрузите минимум 25 песен для начала игры</p>
                                             
-                                            <div className="mt-8">
-                                                <h3 className="text-lg font-semibold mb-4 text-gray-700">Категории:</h3>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
-                                                    {categories.map(c => (
-                                                        <div 
-                                                            key={c.name} 
-                                                            className={`p-4 border-2 rounded-lg cursor-pointer transition ${selectedCategory === c.name ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`} 
-                                                            onClick={() => selectCategory(c.name)}
-                                                        >
-                                                            <div className="font-semibold text-gray-800">{c.name}</div>
-                                                            <div className="text-sm text-gray-600">{c.songCount} песен</div>
-                                                        </div>
-                                                    ))}
+                                            {categories.length === 0 ? (
+                                                <div className="text-gray-500">
+                                                    Пока нет категорий. Ведущий должен создать категорию и добавить песни.
                                                 </div>
-                                            </div>
+                                            ) : (
+                                                <div className="mt-8">
+                                                    <h3 className="text-lg font-semibold mb-4 text-gray-700">Категории:</h3>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
+                                                        {categories.map(c => (
+                                                            <div 
+                                                                key={c.name} 
+                                                                className={`p-4 border-2 rounded-lg cursor-pointer transition ${selectedCategory === c.name ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-blue-300'}`} 
+                                                                onClick={() => selectCategory(c.name)}
+                                                            >
+                                                                <div className="font-semibold text-gray-800">{c.name}</div>
+                                                                <div className="text-sm text-gray-600">{c.songCount} песен</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </>
